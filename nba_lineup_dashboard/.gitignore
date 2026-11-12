@@ -1,0 +1,4 @@
+.env
+.venv
+_pycache__
+progress_checker.txt

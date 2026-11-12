@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NBA Lineup Matchup Dashboard</title>
+  <style>
+    :root { color-scheme:dark; --bg:#0b1020; --panel:#151d31; --panel2:#1c2941; --text:#edf2ff; --muted:#a6b2ca; --accent:#78a9ff; --line:#2d3b56; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; }
+    header { padding:32px max(20px,calc((100vw - 1180px)/2)); background:linear-gradient(120deg,#172747,#10182b); border-bottom:1px solid var(--line); }
+    h1 { margin:0 0 6px; font-size:clamp(25px,4vw,36px); }
+    h2,h3,p { margin-top:0; }
+    .muted,.small,.meta,.note { color:var(--muted); }
+    main { max-width:1180px; margin:28px auto; padding:0 18px 50px; }
+    form { display:flex; gap:10px; align-items:end; flex-wrap:wrap; margin-bottom:22px; }
+    label { display:grid; gap:5px; color:var(--muted); font-size:13px; }
+    input,button { border:1px solid var(--line); border-radius:9px; padding:10px 13px; background:var(--panel); color:var(--text); font:inherit; }
+    button { background:#2859a6; border-color:#3972c9; cursor:pointer; font-weight:650; }
+    .meta { font-size:13px; margin-bottom:18px; }
+    .game { background:var(--panel); border:1px solid var(--line); border-radius:16px; margin:18px 0; overflow:hidden; }
+    .game-head { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:16px 20px; background:var(--panel2); border-bottom:1px solid var(--line); }
+    .game-head h2 { margin:0; font-size:19px; }
+    .status { color:var(--muted); font-size:13px; }
+    .teams { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .team { padding:20px; min-width:0; }
+    .team + .team { border-left:1px solid var(--line); }
+    .team h3 { margin-bottom:4px; }
+    .source { color:var(--accent); font-size:12px; margin-bottom:14px; }
+    .players { display:flex; flex-wrap:wrap; gap:7px; margin:12px 0 18px; }
+    .player { background:#263550; border:1px solid #354966; border-radius:7px; padding:6px 9px; font-size:12px; }
+    .player b { color:#fff; }
+    .section { border-top:1px solid var(--line); padding-top:13px; margin-top:13px; }
+    .section h4 { margin:0 0 8px; font-size:13px; color:#c6d5ef; }
+    .small { font-size:12px; margin-bottom:7px; }
+    table { width:100%; border-collapse:collapse; font-size:12px; }
+    th,td { padding:6px 4px; border-bottom:1px solid var(--line); text-align:right; }
+    th:first-child,td:first-child { text-align:left; }
+    th { color:var(--muted); font-weight:600; }
+    .closest { background:#202d45; border:1px solid #344967; border-radius:10px; padding:12px; margin-top:10px; }
+    .closest-title { font-weight:700; margin-bottom:4px; }
+    .closest-players { color:#d5e1f5; font-size:12px; }
+    .empty { padding:28px; text-align:center; color:var(--muted); }
+    .error { background:#421f2a; border:1px solid #8d4052; border-radius:12px; padding:16px; white-space:pre-wrap; }
+    .note { font-size:12px; margin-top:24px; }
+    @media(max-width:760px) { .teams { grid-template-columns:1fr; } .team + .team { border-left:0; border-top:1px solid var(--line); } }
+    .injury-dropdown {
+    margin-top: 15px;
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+}
+
+.injury-dropdown summary {
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.injury-item {
+    padding: 12px 0;
+    border-bottom: 1px solid #eee;
+}
+
+.injury-item:last-child {
+    border-bottom: none;
+}
+
+.injury-player {
+    font-weight: 600;
+}
+
+.injury-status {
+    margin-top: 4px;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+  </style>
+</head>
+<body>
+{% macro stat_table(stats) -%}
+<table><thead><tr><th>Metric</th><th>Average</th></tr></thead><tbody>
+{% for label, value in stats.items() %}
+<tr><td>{{ label }}</td><td>{{ "%.2f"|format(value) if value is not none else "—" }}</td></tr>
+{% endfor %}
+</tbody></table>
+{%- endmacro %}
+<header>
+  <h1>NBA Lineup Matchup Dashboard</h1>
+  <div class="muted">Today's games, starting lineups, season lineup performance and opponent comparisons.</div>
+</header>
+<main>
+  <form method="get">
+    <label>Game date
+      <input type="date" name="date" value="{{ dashboard.date if dashboard else request.args.get('date', '') }}">
+    </label>
+    <button type="submit">Load games</button>
+  </form>
+  {% if error %}
+    <div class="error">{{ error }}</div>
+  {% elif dashboard %}
+    <div class="meta">{{ dashboard.date }} · {{ dashboard.games|length }} game(s)
+      {% if dashboard.lineup_records is defined %} · · {{ dashboard.lineup_records }} lineup records · Seasons
+Seasons {{ dashboard.seasons | join(", ") }}{% endif %}
+    </div>
+    {% if dashboard.message %}<div class="empty">{{ dashboard.message }}</div>{% endif %}
+    {% for game in dashboard.games %}
+      <article class="game">
+        <div class="game-head"><h2>{{ game.away_team }} @ {{ game.home_team }}</h2><div class="status">{{ game.status }}</div></div>
+        {% if not game.lineups_available %}
+          <div class="empty">Starting lineups are not available yet for both teams. The API may publish projections before tip-off and actual lineups once available.</div>
+        {% else %}
+          <div class="teams">
+            {% for team in [game.away, game.home] %}
+              <section class="team">
+                <h3>{{ team.team_name }}</h3>
+                <div class="source">{{ team.lineup_source }} · {{ team.lineup_status }}</div>
+                <div class="players">
+                  {% for player in team.players %}<span class="player"><b>{{ player.position }}</b> {{ player.name }}</span>{% endfor %}
+                </div>
+
+
+                <details class="injury-dropdown">
+                    <summary>
+                        Injury Report ({{ team.injuries | length }})
+                    </summary>
+
+                    {% if team.injuries %}
+                        {% for injury in team.injuries %}
+                            <div class="injury-item">
+                                <div class="injury-player">
+                                    {{ injury.name }}
+                                    <span class="small">({{ injury.position }})</span>
+                                </div>
+
+                                <div class="injury-status">
+                                    Status: {{ injury.status }}
+                                </div>
+
+                                <div class="small">
+                                    {{ injury.description }}
+                                </div>
+
+                                <div class="small">
+                                    Expected return: {{ injury.return_date }}
+                                </div>
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="small">
+                            No injury records returned for this team.
+                        </div>
+                    {% endif %}
+                </details>
+
+
+                <div class="section">
+                  <h4>Starting five — season averages</h4>
+                  <div class="small">Games together: {{ team.lineup_games }} · Average time on court together per game: {{ "%.1f"|format(team.lineup_avg_minutes or 0) }} minutes · Total time together this season: {{ "%.1f"|format(team.lineup_total_minutes) }} minutes</div>
+                  {{ stat_table(team.lineup_averages) }}
+                </div>
+
+                <div class="section">
+                  <h4>Team performance against this opponent's exact starting five</h4>
+                  <div class="small">Historical head-to-head games with that exact opponent lineup: {{ team.opponent_exact_games }}</div>
+                  {{ stat_table(team.opponent_exact_averages) }}
+                </div>
+
+                <div class="section">
+                  <h4>Similar opponent lineup scouting report</h4>
+                  <div class="small">
+                    Top {{ team.similar_profiles_checked }} closest profiles checked ·
+                    Showing {{ team.similar_lineup_count }} qualifying opponent team(s),
+                    up to 5 maximum · {{ team.similar_games }} distinct head-to-head sample game(s).
+                  </div>
+                  <div class="small">
+                    Each lineup's averages below use only games in which that exact five-man
+                    lineup appeared against {{ team.team_name }}. Lineups are ranked by
+                    similarity to the opponent's current starting five using offensive rating,
+                    defensive rating, pace, and PIE.
+                  </div>
+
+                  {% if team.similar_lineup_appearances %}
+
+                  {% for similar_lineup in team.similar_lineup_appearances %}
+                    <div class="closest">
+                      <div class="closest-title">
+                        #{{ similar_lineup.similarity_rank }} · {{ similar_lineup.team_name }}
+                      </div>
+
+                      <div class="closest-players">
+                        {{ similar_lineup.player_names | join(" · ") }}
+                      </div>
+
+                      <div class="small">
+                        Played together in {{ similar_lineup.games_played }} games across both seasons ·
+                        Appeared against {{ team.team_name }} in {{ similar_lineup.games_in_sample }}
+                        game(s) · {{ "%.1f"|format(similar_lineup.total_minutes_against_team) }}
+                        minutes against {{ team.team_name }}
+                      </div>
+                    </div>
+                  {% endfor %}
+
+                  <div class="section">
+                    <h4>Combined possession-weighted statistics</h4>
+
+                    <div class="small">
+                      Combined sample: {{ team.similar_lineup_count }} similar lineups ·
+                      {{ team.similar_games }} distinct games ·
+                      {{ "%.1f"|format(team.similar_total_possessions) }} possessions ·
+                      {{ "%.1f"|format(team.similar_total_minutes) }} total minutes.
+                    </div>
+
+                    {{ stat_table(team.similar_lineup_averages) }}
+                  </div>
+
+                {% else %}
+                  <div class="small">
+                    None of the 15 closest eligible lineup profiles appeared in a recorded
+                    game against this team across the selected seasons.
+                  </div>
+                {% endif %}
+                </div>
+
+                {% if team.show_h2h_fallback %}
+                  <div class="section">
+                    <h4>Fallback: team performance against this opponent, regardless of lineup</h4>
+                    <div class="small">No exact-lineup matchup sample was available. Showing {{ team.h2h_games }} head-to-head game(s) this season, using all lineup combinations.</div>
+                    {{ stat_table(team.h2h_averages) }}
+                  </div>
+                {% endif %}
+              </section>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </article>
+    {% endfor %}
+    <p class="note">
+  Minutes for a five-player lineup means how long those five players shared
+  the floor, not each player's individual minutes. PIE (Player Impact Estimate)
+  is the API-reported lineup impact measure. Historical lineup statistics
+  combine the 2025 and 2026 seasons. Similar-lineup tables show each selected
+  five-player unit's average statistics only in games where that exact unit
+  appeared against the displayed team. The minutes caption represents the
+  total time that lineup shared the floor in those matchups.
+</p>
+  {% endif %}
+</main>
+</body>
+</html>
